@@ -1102,7 +1102,7 @@ namespace MictcoWebService.Common
                     dRow[13] = myitems.psp_total;
                     _sumtotalT = _sumtotalT + myitems.psp_total;
                     dRow[14] = myitems.psp_profit;
-                    int _ir_id = myitems.psp_ir_id;
+                    int _ir_id = myitems.psp_ir_id ?? 0;
 
                     dRow[15] = myitems.psp_uniquecode;
                     dRow[16] = _ir_id;

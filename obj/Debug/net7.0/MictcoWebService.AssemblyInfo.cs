@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("MictcoWebService")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+a56406519849c501d2a237003a96ec924f636d27")]
 [assembly: System.Reflection.AssemblyProductAttribute("MictcoWebService")]
 [assembly: System.Reflection.AssemblyTitleAttribute("MictcoWebService")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
