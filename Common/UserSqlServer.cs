@@ -317,6 +317,36 @@ namespace MictcoWebService.Common
             }
             return new DataTable();
         }
+
+        /// <summary>
+        /// Runs a query and stops it when the request is canceled.
+        /// SqlCommand.Cancel aborts the server-side command; the caller still closes the connection.
+        /// </summary>
+        public async Task<DataTable> dbReaderFillAsync(string qry, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (shop.State == ConnectionState.Closed)
+            {
+                shop.ConnectionString = connetionString;
+                await shop.OpenAsync(cancellationToken);
+            }
+
+            using (SqlCommand cmd = new SqlCommand(qry, shop))
+            {
+                cmd.CommandTimeout = 60;
+                using (cancellationToken.Register(() =>
+                {
+                    try { cmd.Cancel(); } catch { }
+                }))
+                using (SqlDataReader reader = await cmd.ExecuteReaderAsync(cancellationToken))
+                {
+                    DataTable table = new DataTable();
+                    table.Load(reader);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    return table;
+                }
+            }
+        }
         public object dbScalar(string qry)
         {
             if (OpenConnection())

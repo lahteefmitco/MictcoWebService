@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using MictcoWebService.Models;
 using System.IdentityModel.Tokens.Jwt;
@@ -324,26 +325,51 @@ namespace MictcoWebService.Controllers
         [HttpGet("user-locations")]
         public async Task<IActionResult> getUserLocations()
         {
+            var cancellationToken = HttpContext.RequestAborted;
+            UserSqlServer usqlre = null;
             try
             {
-                UserSqlServer usqlre = new UserSqlServer(this, validateUser: false);
+                usqlre = new UserSqlServer(this, validateUser: false);
                 using SqlConnection conn = await OpenLoginConnectionAsync(usqlre);
 
                 Dictionary<string, DataTable> hash = new Dictionary<string, DataTable>();
-                DataTable locations = Fill(conn, "select cast(gl_id as nvarchar(50)) as gl_id,gl_name from gnl_location");
+                DataTable locations = await FillAsync(conn, "select cast(gl_id as nvarchar(50)) as gl_id,gl_name from gnl_location", cancellationToken);
                 hash.Add("loactions", locations ?? new DataTable());
 
                 DataTable dt_area = new DataTable();
-                if (SettingIsOn(Fill(conn, "SELECT ans_status FROM android_settings WHERE ans_name='AREAWISE LOGIN'")))
-                    dt_area = Fill(conn, "select cast(area_id as nvarchar(50)) as value,area_name as label from acc_area") ?? new DataTable();
+                if (SettingIsOn(await FillAsync(conn, "SELECT ans_status FROM android_settings WHERE ans_name='AREAWISE LOGIN'", cancellationToken)))
+                    dt_area = await FillAsync(conn, "select cast(area_id as nvarchar(50)) as value,area_name as label from acc_area", cancellationToken) ?? new DataTable();
 
                 DataTable dt_route = new DataTable();
-                if (SettingIsOn(Fill(conn, "SELECT ans_status FROM android_settings WHERE ans_name='ROUTEWISE LOGIN'")))
-                    dt_route = Fill(conn, "select cast(r_id as nvarchar(50)) as value,r_name as label from inv_rout_reg") ?? new DataTable();
+                if (SettingIsOn(await FillAsync(conn, "SELECT ans_status FROM android_settings WHERE ans_name='ROUTEWISE LOGIN'", cancellationToken)))
+                    dt_route = await FillAsync(conn, "select cast(r_id as nvarchar(50)) as value,r_name as label from inv_rout_reg", cancellationToken) ?? new DataTable();
 
                 hash.Add("area", dt_area);
                 hash.Add("route", dt_route);
                 return Ok(ReportModelContext.searializeDt(hash));
+            }
+            catch (OperationCanceledException)
+            {
+                return StatusCode(499);
+            }
+            catch (SqlException) when (cancellationToken.IsCancellationRequested)
+            {
+                return StatusCode(499);
+            }
+            catch (Exception) when (cancellationToken.IsCancellationRequested)
+            {
+                return StatusCode(499);
+            }
+            catch (SqlException ex)
+            {
+                Console.WriteLine("SqlException: " + ex.Message);
+                return StatusCode(422, new
+                {
+                    status = false,
+                    statusCode = 422,
+                    message = ex.Message,
+                    data = (object)null
+                });
             }
             catch (Exception ex)
             {
@@ -352,6 +378,10 @@ namespace MictcoWebService.Controllers
                     status = false,
                     message = ex.Message
                 });
+            }
+            finally
+            {
+                usqlre?.close();
             }
         }
         [HttpGet("check-route-wise-login")]
@@ -430,6 +460,26 @@ namespace MictcoWebService.Controllers
             var table = new DataTable();
             adapter.Fill(table);
             return table;
+        }
+
+        private static async Task<DataTable> FillAsync(SqlConnection connection, string sql, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            using var command = new SqlCommand(sql, connection)
+            {
+                CommandTimeout = 30
+            };
+            using (cancellationToken.Register(() =>
+            {
+                try { command.Cancel(); } catch { }
+            }))
+            using (SqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken))
+            {
+                var table = new DataTable();
+                table.Load(reader);
+                cancellationToken.ThrowIfCancellationRequested();
+                return table;
+            }
         }
 
     }

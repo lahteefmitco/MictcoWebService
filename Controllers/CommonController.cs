@@ -4967,40 +4967,137 @@ GROUP BY a.as_id";
 
 
         [HttpGet("all-permission")]
-        public string allPermission()
+        public async Task<IActionResult> allPermission()
         {
-            UserSqlServer usqlre = new UserSqlServer(this);
-            string sql = "select am_as_name as label,am_id as value from android_menu where am_other=1";
-            DataTable permisions = usqlre.dbReaderFill(sql);
-            usqlre.close();
-            return ReportModelContext.searializeDt(permisions);
-
+            var cancellationToken = HttpContext.RequestAborted;
+            UserSqlServer usqlre = null;
+            try
+            {
+                usqlre = new UserSqlServer(this);
+                string sql = "select am_as_name as label,am_id as value from android_menu where am_other=1";
+                DataTable permisions = await usqlre.dbReaderFillAsync(sql, cancellationToken);
+                return Content(ReportModelContext.searializeDt(permisions), "application/json");
+            }
+            catch (OperationCanceledException)
+            {
+                return StatusCode(499);
+            }
+            catch (SqlException) when (cancellationToken.IsCancellationRequested)
+            {
+                return StatusCode(499);
+            }
+            catch (Exception) when (cancellationToken.IsCancellationRequested)
+            {
+                return StatusCode(499);
+            }
+            catch (SqlException ex)
+            {
+                Console.WriteLine("SqlException: " + ex.ToString());
+                return StatusCode(422, new
+                {
+                    status = false,
+                    statusCode = 422,
+                    message = ex.Message,
+                    data = (object)null
+                });
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("Exception: " + ex.ToString());
+                return StatusCode(500, new { status = false, message = ex.Message });
+            }
+            finally
+            {
+                if (usqlre != null)
+                    usqlre.close();
+            }
         }
    
 
         [HttpGet("get-permission/{id}")]
-        public string getPermission(int id)
+        public async Task<IActionResult> getPermission(int id)
         {
-            UserSqlServer usqlre = new UserSqlServer(this);
-            string sql = "select am_as_name as label,ap_m_id as value from android_permission_menu inner join android_menu on ap_m_id = am_id  where am_other=1 and android_permission_menu.ap_gu_user_id=" + id + " and android_permission_menu.ap_other_status=1";
-            DataTable permisions = usqlre.dbReaderFill(sql);
-            usqlre.close();
-            return ReportModelContext.searializeDt(permisions);
+            var cancellationToken = HttpContext.RequestAborted;
+            UserSqlServer usqlre = null;
+            try
+            {
+                usqlre = new UserSqlServer(this);
+                string sql = "select am_as_name as label,ap_m_id as value from android_permission_menu inner join android_menu on ap_m_id = am_id  where am_other=1 and android_permission_menu.ap_gu_user_id=" + id + " and android_permission_menu.ap_other_status=1";
+                DataTable permisions = await usqlre.dbReaderFillAsync(sql, cancellationToken);
+                return Content(ReportModelContext.searializeDt(permisions), "application/json");
+            }
+            catch (OperationCanceledException)
+            {
+                return StatusCode(499);
+            }
+            catch (SqlException) when (cancellationToken.IsCancellationRequested)
+            {
+                return StatusCode(499);
+            }
+            catch (Exception) when (cancellationToken.IsCancellationRequested)
+            {
+                return StatusCode(499);
+            }
+            catch (SqlException ex)
+            {
+                Console.WriteLine("SqlException: " + ex.ToString());
+                return StatusCode(422, new
+                {
+                    status = false,
+                    statusCode = 422,
+                    message = ex.Message,
+                    data = (object)null
+                });
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("Exception: " + ex.ToString());
+                return StatusCode(500, new { status = false, message = ex.Message });
+            }
+            finally
+            {
+                if (usqlre != null)
+                    usqlre.close();
+            }
         }
 
         [HttpPost("save-permission")]
         public async Task<IActionResult> savePermission([FromBody] PermissionModel model)
         {
-            UserSqlServer usqlre = new UserSqlServer(this);
-            bool status = usqlre.savePermission("save_permission", model);
-            usqlre.close();
-            if (status)
+            UserSqlServer usqlre = null;
+            try
             {
-                return Ok(new { status = true});
+                usqlre = new UserSqlServer(this);
+                bool status = usqlre.savePermission("save_permission", model);
+                if (status)
+                {
+                    return Ok(new { status = true });
+                }
+                else
+                {
+                    return Ok(new { status = false });
+                }
             }
-            else
+            catch (SqlException ex)
             {
-                return Ok(new { status = false });
+                Console.WriteLine("SqlException: " + ex.ToString());
+                return StatusCode(422, new
+                {
+                    status = false,
+                    statusCode = 422,
+                    message = ex.Message,
+                    data = (object)null
+                });
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("Exception: " + ex.ToString());
+                return StatusCode(500, new { status = false, message = ex.Message });
+            }
+            finally
+            {
+                if (usqlre != null)
+                    usqlre.close();
             }
         }
 

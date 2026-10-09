@@ -3948,7 +3948,7 @@ namespace MictcoWebService.Controllers
             }
         }
         [HttpGet("spare-list")]
-        public async Task<IActionResult> SpareList(string? searchKey)
+        public async Task<IActionResult> SpareList(string searchKey)
         {
             var cancellationToken = HttpContext.RequestAborted;
             UserSqlServer usqlre = null;

@@ -124,13 +124,20 @@ namespace MictcoWebService
                     c.OAuthUsePkce();
                 });
             ////}
-            
-            app.UseCors("MyPolicy");
-            app.UseStaticFiles();
-            app.UseAuthentication();
-            app.UseRouting();
-            app.UseAuthorization();
+
             app.UseHttpsRedirection();
+            app.UseStaticFiles();
+            app.UseRouting();
+            app.Use(async (context, next) =>
+            {
+                if (context.Request.Headers.ContainsKey("Access-Control-Request-Private-Network"))
+                    context.Response.Headers["Access-Control-Allow-Private-Network"] = "true";
+
+                await next();
+            });
+            app.UseCors("MyPolicy");
+            app.UseAuthentication();
+            app.UseAuthorization();
             app.UseEndpoints(endpoints =>
             {
                 endpoints.MapGet("/", () => "Hello World!");
