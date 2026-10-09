@@ -2969,9 +2969,10 @@ namespace MictcoWebService.Controllers
            [FromQuery] TicketFiltrationModel model)
         {
             var cancellationToken = HttpContext.RequestAborted;
+            UserSqlServer usqlre = null;
             try
             {
-                UserSqlServer usqlre = new UserSqlServer(this);
+                usqlre = new UserSqlServer(this);
                 string userId = usqlre.userId;
                 DataTable ticketTable;
                 DataTable lendTable;
@@ -2991,18 +2992,18 @@ namespace MictcoWebService.Controllers
 
                 try
                 {
-                if (!await usqlre.OpenConnectionAsync(HttpContext.RequestAborted))
-                {
-                    return StatusCode(500, new
+                    if (!await usqlre.OpenConnectionAsync(HttpContext.RequestAborted))
                     {
-                        status = false,
-                        statusCode = 500,
-                        message = "Database connection failed: " + usqlre.lastError,
-                        data = (object)null
-                    });
-                }
+                        return StatusCode(500, new
+                        {
+                            status = false,
+                            statusCode = 500,
+                            message = "Database connection failed: " + usqlre.lastError,
+                            data = (object)null
+                        });
+                    }
 
-                const string ticketSql = @"
+                    const string ticketSql = @"
                         DECLARE @UserRole NVARCHAR(100),
                         @UserAccId NUMERIC(18,0);
 
@@ -3063,7 +3064,7 @@ namespace MictcoWebService.Controllers
                         AND (@rout_id IS NULL OR c.scr_rout_id = @rout_id)
                         ORDER BY s.si_entryno DESC";
 
-                const string lendSql = @"
+                    const string lendSql = @"
                         DECLARE @UserRole NVARCHAR(100),
                         @UserAccId NUMERIC(18,0);
 
@@ -3112,27 +3113,27 @@ namespace MictcoWebService.Controllers
                         AND (@si_assign_to IS NULL OR s.si_assign_to = @si_assign_to)
                         AND (@rout_id IS NULL OR c.scr_rout_id = @rout_id)";
 
-                ticketTable = new DataTable();
-                lendTable = new DataTable();
+                    ticketTable = new DataTable();
+                    lendTable = new DataTable();
 
-                using (SqlCommand cmd = new SqlCommand(ticketSql, usqlre.shop))
-                {
-                    cmd.CommandTimeout = 60;
-                    AddTicketFilters(cmd, model, userId);
-                    ticketTable = await LoadTableAsync(cmd, cancellationToken);
-                }
+                    using (SqlCommand cmd = new SqlCommand(ticketSql, usqlre.shop))
+                    {
+                        cmd.CommandTimeout = 60;
+                        AddTicketFilters(cmd, model, userId);
+                        ticketTable = await LoadTableAsync(cmd, cancellationToken);
+                    }
 
-                using (SqlCommand cmd = new SqlCommand(lendSql, usqlre.shop))
-                {
-                    cmd.CommandTimeout = 60;
-                    AddTicketFilters(cmd, model, userId);
-                    lendTable = await LoadTableAsync(cmd, cancellationToken);
-                }
+                    using (SqlCommand cmd = new SqlCommand(lendSql, usqlre.shop))
+                    {
+                        cmd.CommandTimeout = 60;
+                        AddTicketFilters(cmd, model, userId);
+                        lendTable = await LoadTableAsync(cmd, cancellationToken);
+                    }
                 }
                 finally
                 {
                     usqlre.ReleaseConnection();
-                    _ticketQueryThrottle.Release();
+                  //  _ticketQueryThrottle.Release();
                 }
 
 
@@ -3303,6 +3304,12 @@ namespace MictcoWebService.Controllers
                     data = (object)null
                 });
             }
+            finally
+            {
+                _ticketQueryThrottle.Release();
+                usqlre?.ReleaseConnection();
+
+            }
         }
 
         /// <summary>
@@ -3314,27 +3321,52 @@ namespace MictcoWebService.Controllers
             CommandType commandType,
             params SqlParameter[] parameters)
         {
-            var cancellationToken = HttpContext.RequestAborted;
-            UserSqlServer usqlre = new UserSqlServer(this, validateUser: false);
-            string connectionString = usqlre.getConnectionString();
-            if (string.IsNullOrWhiteSpace(connectionString))
-                throw new InvalidOperationException("Database connection string is missing.");
-
-            using SqlConnection conn = new SqlConnection(connectionString);
-            await conn.OpenAsync(cancellationToken);
-
-            using SqlCommand cmd = new SqlCommand(commandText, conn)
+            UserSqlServer usqlre = null;
+            try
             {
-                CommandType = commandType,
-                CommandTimeout = 30
-            };
-            if (parameters != null)
-            {
-                foreach (SqlParameter parameter in parameters)
-                    cmd.Parameters.Add(parameter);
+                var cancellationToken = HttpContext.RequestAborted;
+                usqlre = new(this, validateUser: false);
+                string connectionString = usqlre.getConnectionString();
+                if (string.IsNullOrWhiteSpace(connectionString))
+                    throw new InvalidOperationException("Database connection string is missing.");
+
+                using SqlConnection conn = new SqlConnection(connectionString);
+                await conn.OpenAsync(cancellationToken);
+
+                using SqlCommand cmd = new SqlCommand(commandText, conn)
+                {
+                    CommandType = commandType,
+                    CommandTimeout = 30
+                };
+                if (parameters != null)
+                {
+                    foreach (SqlParameter parameter in parameters)
+                        cmd.Parameters.Add(parameter);
+                }
+
+                return await LoadTableAsync(cmd, cancellationToken);
             }
-
-            return await LoadTableAsync(cmd, cancellationToken);
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (SqlException) when (HttpContext.RequestAborted.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (SqlException sqlEx)
+            {
+                throw new InvalidOperationException("Database query failed: " + sqlEx.Message, sqlEx);
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException("Unexpected error: " + ex.Message, ex);
+            }
+            finally
+            {
+                Console.WriteLine("Releasing SQL connection for user ");
+                usqlre?.close();
+            }
         }
 
         /// <summary>
@@ -3381,7 +3413,7 @@ namespace MictcoWebService.Controllers
         private static void AddTicketFilters(SqlCommand cmd, TicketFiltrationModel model, string userId)
         {
             cmd.Parameters.Add("@si_user_id", SqlDbType.NVarChar, 100).Value =
-                string.IsNullOrEmpty(userId)? (object)DBNull.Value: userId;
+                string.IsNullOrEmpty(userId) ? (object)DBNull.Value : userId;
             cmd.Parameters.Add("@si_other_remarks", SqlDbType.NVarChar, -1).Value =
                 string.IsNullOrWhiteSpace(model.status) ? DBNull.Value : model.status;
             cmd.Parameters.Add("@from_date", SqlDbType.Date).Value =
@@ -4661,262 +4693,262 @@ namespace MictcoWebService.Controllers
             int tres = -6;
             try
             {
-            usqlre = new UserSqlServer(this);
-            str_id = model.isTax ? 1 : 14;
-            // Items collected string
-            string si_items_collected = "";
-            if (model.list_itemscollected != null && model.list_itemscollected.Count > 0)
-            {
-                si_items_collected = string.Join(",", model.list_itemscollected);
-            }
+                usqlre = new UserSqlServer(this);
+                str_id = model.isTax ? 1 : 14;
+                // Items collected string
+                string si_items_collected = "";
+                if (model.list_itemscollected != null && model.list_itemscollected.Count > 0)
+                {
+                    si_items_collected = string.Join(",", model.list_itemscollected);
+                }
 
-            DataTable dt1 = new DataTable();
-            dt1.Columns.Add("qty");//0
-            dt1.Columns.Add("fqty");//1
-            dt1.Columns.Add("s_rate");//2
-            dt1.Columns.Add("real_rate");//3
-            dt1.Columns.Add("gross");//4
-            dt1.Columns.Add("disc_p");//5
-            dt1.Columns.Add("disc");//6
-            dt1.Columns.Add("real_disc");//7
-            dt1.Columns.Add("net");//8
-            dt1.Columns.Add("tax");//9
-            dt1.Columns.Add("cgst");//10
-            dt1.Columns.Add("sgst");//11
-            dt1.Columns.Add("igst");//12
-            dt1.Columns.Add("total");//13
-            dt1.Columns.Add("pt");//14
-            dt1.Columns.Add("uniquecode");//15
-            dt1.Columns.Add("ir_id");//16
-            dt1.Columns.Add("mrp");//17
-            dt1.Columns.Add("qty_multi_unit");//18
-            dt1.Columns.Add("unit_multi");//19
-            dt1.Columns.Add("srate_multiunit");//20
-            dt1.Columns.Add("narration");//21
-            dt1.Columns.Add("cess");//22
-            dt1.Columns.Add("ad_cess");//23
-            dt1.Columns.Add("kfc");//24
-            dt1.Columns.Add("support");//25
-            dt1.Columns.Add("real_support");//26
-            dt1.Columns.Add("salesman");//27
-            dt1.Columns.Add("sp_prate");//28
-            dt1.Columns.Add("sp_realprate");//29
-            dt1.Columns.Add("sp_cost");//30
-            dt1.Columns.Add("sp_local_exp");//31
-            dt1.Columns.Add("sp_lend_amount");//32
-            dt1.Columns.Add("sp_discp2");//33
-            dt1.Columns.Add("sp_disc2");//34
-            dt1.Columns.Add("sp_netratesingle");//35
-            dt1.Columns.Add("sp_narration1");//36
-            dt1.Columns.Add("sp_other_exp");//37
-            dt1.Columns.Add("sp_print");//38
-            dt1.Columns.Add("sp_card_disc");//39
-            dt1.Columns.Add("sp_depreciation_per");//40
-            dt1.Columns.Add("sp_depreciation");//41
-            dt1.Columns.Add("sp_narration2");//42
-            dt1.Columns.Add("sp_narration3");//43
-            bool hasSpRowId = Convert.ToInt32(usqlre.dbScalar(@"
+                DataTable dt1 = new DataTable();
+                dt1.Columns.Add("qty");//0
+                dt1.Columns.Add("fqty");//1
+                dt1.Columns.Add("s_rate");//2
+                dt1.Columns.Add("real_rate");//3
+                dt1.Columns.Add("gross");//4
+                dt1.Columns.Add("disc_p");//5
+                dt1.Columns.Add("disc");//6
+                dt1.Columns.Add("real_disc");//7
+                dt1.Columns.Add("net");//8
+                dt1.Columns.Add("tax");//9
+                dt1.Columns.Add("cgst");//10
+                dt1.Columns.Add("sgst");//11
+                dt1.Columns.Add("igst");//12
+                dt1.Columns.Add("total");//13
+                dt1.Columns.Add("pt");//14
+                dt1.Columns.Add("uniquecode");//15
+                dt1.Columns.Add("ir_id");//16
+                dt1.Columns.Add("mrp");//17
+                dt1.Columns.Add("qty_multi_unit");//18
+                dt1.Columns.Add("unit_multi");//19
+                dt1.Columns.Add("srate_multiunit");//20
+                dt1.Columns.Add("narration");//21
+                dt1.Columns.Add("cess");//22
+                dt1.Columns.Add("ad_cess");//23
+                dt1.Columns.Add("kfc");//24
+                dt1.Columns.Add("support");//25
+                dt1.Columns.Add("real_support");//26
+                dt1.Columns.Add("salesman");//27
+                dt1.Columns.Add("sp_prate");//28
+                dt1.Columns.Add("sp_realprate");//29
+                dt1.Columns.Add("sp_cost");//30
+                dt1.Columns.Add("sp_local_exp");//31
+                dt1.Columns.Add("sp_lend_amount");//32
+                dt1.Columns.Add("sp_discp2");//33
+                dt1.Columns.Add("sp_disc2");//34
+                dt1.Columns.Add("sp_netratesingle");//35
+                dt1.Columns.Add("sp_narration1");//36
+                dt1.Columns.Add("sp_other_exp");//37
+                dt1.Columns.Add("sp_print");//38
+                dt1.Columns.Add("sp_card_disc");//39
+                dt1.Columns.Add("sp_depreciation_per");//40
+                dt1.Columns.Add("sp_depreciation");//41
+                dt1.Columns.Add("sp_narration2");//42
+                dt1.Columns.Add("sp_narration3");//43
+                bool hasSpRowId = Convert.ToInt32(usqlre.dbScalar(@"
             SELECT COUNT(*)
             FROM INFORMATION_SCHEMA.COLUMNS
             WHERE TABLE_NAME='inv_sales_par'
             AND COLUMN_NAME='sp_row_id'")) > 0;
 
-            if (hasSpRowId)
-            {
-                dt1.Columns.Add("sp_row_id");
-            }
-            int slNo = 1;
-            // Populate dt1 from model.Items
-            foreach (var row in model.Items ?? Enumerable.Empty<ItemRowModel>())
-            {
-                // Use slno presence as indicator, if null skip
-                if (row == null || row.ir_id == null)
-                    continue;
-                // 🔹 STEP 1: Check service item
-                string chkServiceSql = "select ir_service_item, ir_taxper from inv_item_reg where ir_id=" + row.ir_id;
-                DataTable dtService = usqlre.dbReaderFill(chkServiceSql);
-                int isService = 0;
-                if (dtService.Rows.Count > 0)
-                    isService = Convert.ToInt32(dtService.Rows[0]["ir_service_item"]);
-                decimal sp_rate = 0, sp_realrate = 0, sp_gross = 0,
-                sp_net = 0, sp_tax = 0, sp_total = 0,
-                sp_igst = 0, sp_cgst = 0, sp_sgst = 0, sp_disc = 0,
-                sp_mrp = 0, sp_srate_multiunit = 0,
-                sp_prate = 0, sp_realprate = 0, sp_cost = 0, sp_taxper = 0;
-                long sp_uniquecode = 0;
-                if (isService == 1)
+                if (hasSpRowId)
                 {
-                    sp_taxper = dtService.Rows[0]["ir_taxper"] != DBNull.Value
-                ? Convert.ToDecimal(dtService.Rows[0]["ir_taxper"])
-                : 0;
-
-                    decimal total = row.total ?? 0;
-
-                    if (sp_taxper > 0 && model.isTax)
-                    {
-                        // 🔹 TAX INCLUDED CALCULATION
-                        decimal baseAmount = Math.Round(total / (1 + (sp_taxper / 100)), 2);
-                        decimal taxAmount = Math.Round(total - baseAmount, 2);
-
-                        sp_rate = total;
-                        sp_realrate = baseAmount;
-                        sp_gross = total;
-                        sp_net = baseAmount;
-                        sp_tax = taxAmount;
-                        sp_total = total;
-
-                        // 🔹 Split GST (assuming intra-state)
-                        sp_cgst = Math.Round(taxAmount / 2, 3);
-                        sp_sgst = Math.Round(taxAmount / 2, 3);
-
-                        sp_igst = 0;
-                    }
-                    else
-                    {
-                        // 🔹 NO TAX OR TAX OFF
-                        sp_rate = total;
-                        sp_realrate = total;
-                        sp_gross = total;
-                        sp_net = total;
-                        sp_tax = 0;
-                        sp_total = total;
-
-                        sp_cgst = 0;
-                        sp_sgst = 0;
-                        sp_igst = 0;
-                    }
-
-                    sp_disc = row.discount ?? 0;
+                    dt1.Columns.Add("sp_row_id");
                 }
-                else
+                int slNo = 1;
+                // Populate dt1 from model.Items
+                foreach (var row in model.Items ?? Enumerable.Empty<ItemRowModel>())
                 {
-                    string sql = @"select top 1 sp_uniquecode,sp_rate,sp_realrate, sp_gross_value,sp_disc,sp_net_amount,sp_tax,sp_total,sp_igst,sp_cgst,sp_sgst,sp_mrp,sp_srate_multiunit,sp_prate,sp_realprate,sp_cost,sp_taxper from inv_sales_par where sp_str_id=12 and sp_entryno=" + model.ticket_id + " and sp_ir_id=" + row.ir_id + "";
-
-                    DataTable dt = usqlre.dbReaderFill(sql);
-
-
-
-                    if (dt != null && dt.Rows.Count > 0)
+                    // Use slno presence as indicator, if null skip
+                    if (row == null || row.ir_id == null)
+                        continue;
+                    // 🔹 STEP 1: Check service item
+                    string chkServiceSql = "select ir_service_item, ir_taxper from inv_item_reg where ir_id=" + row.ir_id;
+                    DataTable dtService = usqlre.dbReaderFill(chkServiceSql);
+                    int isService = 0;
+                    if (dtService.Rows.Count > 0)
+                        isService = Convert.ToInt32(dtService.Rows[0]["ir_service_item"]);
+                    decimal sp_rate = 0, sp_realrate = 0, sp_gross = 0,
+                    sp_net = 0, sp_tax = 0, sp_total = 0,
+                    sp_igst = 0, sp_cgst = 0, sp_sgst = 0, sp_disc = 0,
+                    sp_mrp = 0, sp_srate_multiunit = 0,
+                    sp_prate = 0, sp_realprate = 0, sp_cost = 0, sp_taxper = 0;
+                    long sp_uniquecode = 0;
+                    if (isService == 1)
                     {
-                        DataRow salesRow = dt.Rows[0];
+                        sp_taxper = dtService.Rows[0]["ir_taxper"] != DBNull.Value
+                    ? Convert.ToDecimal(dtService.Rows[0]["ir_taxper"])
+                    : 0;
 
-                        sp_uniquecode = Convert.ToInt64(salesRow["sp_uniquecode"]);
-                        sp_rate = Convert.ToDecimal(salesRow["sp_rate"]);
-                        sp_realrate = Convert.ToDecimal(salesRow["sp_realrate"]);
-                        sp_gross = Convert.ToDecimal(salesRow["sp_gross_value"]);
-                        sp_disc = Convert.ToDecimal(salesRow["sp_disc"]);
-                        sp_net = Convert.ToDecimal(salesRow["sp_net_amount"]);
-                        sp_tax = Convert.ToDecimal(salesRow["sp_tax"]);
-                        sp_total = Convert.ToDecimal(salesRow["sp_total"]);
-                        sp_igst = Convert.ToDecimal(salesRow["sp_igst"]);
-                        sp_cgst = Convert.ToDecimal(salesRow["sp_cgst"]);
-                        sp_sgst = Convert.ToDecimal(salesRow["sp_sgst"]);
-                        sp_mrp = Convert.ToDecimal(salesRow["sp_mrp"]);
-                        sp_srate_multiunit = Convert.ToDecimal(salesRow["sp_srate_multiunit"]);
-                        sp_prate = Convert.ToDecimal(salesRow["sp_prate"]);
-                        sp_realprate = Convert.ToDecimal(salesRow["sp_realprate"]);
-                        sp_cost = Convert.ToDecimal(salesRow["sp_cost"]);
-                        sp_taxper = Convert.ToDecimal(salesRow["sp_taxper"]);
-                        if (!model.isTax)
+                        decimal total = row.total ?? 0;
+
+                        if (sp_taxper > 0 && model.isTax)
                         {
+                            // 🔹 TAX INCLUDED CALCULATION
+                            decimal baseAmount = Math.Round(total / (1 + (sp_taxper / 100)), 2);
+                            decimal taxAmount = Math.Round(total - baseAmount, 2);
+
+                            sp_rate = total;
+                            sp_realrate = baseAmount;
+                            sp_gross = total;
+                            sp_net = baseAmount;
+                            sp_tax = taxAmount;
+                            sp_total = total;
+
+                            // 🔹 Split GST (assuming intra-state)
+                            sp_cgst = Math.Round(taxAmount / 2, 3);
+                            sp_sgst = Math.Round(taxAmount / 2, 3);
+
+                            sp_igst = 0;
+                        }
+                        else
+                        {
+                            // 🔹 NO TAX OR TAX OFF
+                            sp_rate = total;
+                            sp_realrate = total;
+                            sp_gross = total;
+                            sp_net = total;
                             sp_tax = 0;
+                            sp_total = total;
+
                             sp_cgst = 0;
                             sp_sgst = 0;
                             sp_igst = 0;
-                            sp_srate_multiunit = 0;
+                        }
 
-                            // Net should be equal to total (no tax split)
-                            sp_rate = sp_rate;
-                            sp_realrate = sp_rate;
-                            sp_net = sp_total;
-                            sp_gross = sp_total;
+                        sp_disc = row.discount ?? 0;
+                    }
+                    else
+                    {
+                        string sql = @"select top 1 sp_uniquecode,sp_rate,sp_realrate, sp_gross_value,sp_disc,sp_net_amount,sp_tax,sp_total,sp_igst,sp_cgst,sp_sgst,sp_mrp,sp_srate_multiunit,sp_prate,sp_realprate,sp_cost,sp_taxper from inv_sales_par where sp_str_id=12 and sp_entryno=" + model.ticket_id + " and sp_ir_id=" + row.ir_id + "";
+
+                        DataTable dt = usqlre.dbReaderFill(sql);
 
 
+
+                        if (dt != null && dt.Rows.Count > 0)
+                        {
+                            DataRow salesRow = dt.Rows[0];
+
+                            sp_uniquecode = Convert.ToInt64(salesRow["sp_uniquecode"]);
+                            sp_rate = Convert.ToDecimal(salesRow["sp_rate"]);
+                            sp_realrate = Convert.ToDecimal(salesRow["sp_realrate"]);
+                            sp_gross = Convert.ToDecimal(salesRow["sp_gross_value"]);
+                            sp_disc = Convert.ToDecimal(salesRow["sp_disc"]);
+                            sp_net = Convert.ToDecimal(salesRow["sp_net_amount"]);
+                            sp_tax = Convert.ToDecimal(salesRow["sp_tax"]);
+                            sp_total = Convert.ToDecimal(salesRow["sp_total"]);
+                            sp_igst = Convert.ToDecimal(salesRow["sp_igst"]);
+                            sp_cgst = Convert.ToDecimal(salesRow["sp_cgst"]);
+                            sp_sgst = Convert.ToDecimal(salesRow["sp_sgst"]);
+                            sp_mrp = Convert.ToDecimal(salesRow["sp_mrp"]);
+                            sp_srate_multiunit = Convert.ToDecimal(salesRow["sp_srate_multiunit"]);
+                            sp_prate = Convert.ToDecimal(salesRow["sp_prate"]);
+                            sp_realprate = Convert.ToDecimal(salesRow["sp_realprate"]);
+                            sp_cost = Convert.ToDecimal(salesRow["sp_cost"]);
+                            sp_taxper = Convert.ToDecimal(salesRow["sp_taxper"]);
+                            if (!model.isTax)
+                            {
+                                sp_tax = 0;
+                                sp_cgst = 0;
+                                sp_sgst = 0;
+                                sp_igst = 0;
+                                sp_srate_multiunit = 0;
+
+                                // Net should be equal to total (no tax split)
+                                sp_rate = sp_rate;
+                                sp_realrate = sp_rate;
+                                sp_net = sp_total;
+                                sp_gross = sp_total;
+
+
+                            }
                         }
                     }
+
+
+                    DataRow dRow = dt1.NewRow();
+
+                    dRow[0] = row.qty;                 // qty
+                    dRow[1] = 0;                       // fqty
+                    dRow[2] = sp_rate;                 // s_rate
+                    dRow[3] = sp_realrate;             // real_rate
+                    dRow[4] = sp_gross;                // gross
+                    dRow[5] = 0;                       // disc_p
+                    dRow[6] = sp_disc;                 // disc
+                    dRow[7] = 0;                       // real_disc
+                    dRow[8] = sp_net;                  // net
+                    dRow[9] = sp_tax;                  // tax
+                    dRow[10] = sp_cgst;                 // cgst
+                    dRow[11] = sp_sgst;                 // sgst
+                    dRow[12] = sp_igst;                 // igst
+                    dRow[13] = sp_total;                // total
+                    dRow[14] = sp_taxper;               // pt
+                    dRow[15] = sp_uniquecode;           // uniquecode
+                    dRow[16] = row.ir_id;               // ir_id
+                    dRow[17] = sp_mrp;                  // mrp
+                    dRow[18] = 0;                       // qty_multi_unit
+                    dRow[19] = 0;                       // unit_multi
+                    dRow[20] = sp_srate_multiunit;      // srate_multiunit
+                    dRow[21] = "";                      // narration
+                    dRow[22] = 0;                       // cess
+                    dRow[23] = 0;                       // ad_cess
+                    dRow[24] = 0;                       // kfc
+                    dRow[25] = 0;                       // support
+                    dRow[26] = 0;                       // real_support
+                    dRow[27] = "-1";                    // salesman
+                    dRow[28] = sp_prate;                // sp_prate
+                    dRow[29] = sp_realprate;            // sp_realprate
+                    dRow[30] = sp_cost;                 // sp_cost
+                    dRow[31] = "";                      // sp_local_exp
+                    dRow[32] = 0;                       // sp_lend_amount
+                    dRow[33] = "";                      // sp_discp2
+                    dRow[34] = 0;                       // sp_disc2
+                    dRow[35] = 0;                       // sp_netratesingle
+                    dRow[36] = "";                      // sp_narration1
+                    dRow[37] = 0;                       // sp_other_exp
+                    dRow[38] = 0;                       // sp_print
+                    dRow[39] = 0;                       // sp_card_disc
+                    dRow[40] = 0;                       // sp_depreciation_per
+                    dRow[41] = 0;                       // sp_depreciation
+                    dRow[42] = "";                      // sp_narration2
+                    dRow[43] = "";                      // sp_narration3
+                    if (hasSpRowId)
+                    {
+                        dRow["sp_row_id"] = slNo;
+                        slNo++;
+                    }
+                    dt1.Rows.Add(dRow);
                 }
 
 
-                DataRow dRow = dt1.NewRow();
+                // Build dtlent
+                DataTable dtlent = new DataTable();
+                dtlent.Columns.Add("li_in");
+                dtlent.Columns.Add("li_out");
+                dtlent.Columns.Add("li_remarks");
+                dtlent.Columns.Add("li_ir_id");
+                dtlent.Columns.Add("li_ift_id");
+                dtlent.Columns.Add("li_ir_mrp");
 
-                dRow[0] = row.qty;                 // qty
-                dRow[1] = 0;                       // fqty
-                dRow[2] = sp_rate;                 // s_rate
-                dRow[3] = sp_realrate;             // real_rate
-                dRow[4] = sp_gross;                // gross
-                dRow[5] = 0;                       // disc_p
-                dRow[6] = sp_disc;                 // disc
-                dRow[7] = 0;                       // real_disc
-                dRow[8] = sp_net;                  // net
-                dRow[9] = sp_tax;                  // tax
-                dRow[10] = sp_cgst;                 // cgst
-                dRow[11] = sp_sgst;                 // sgst
-                dRow[12] = sp_igst;                 // igst
-                dRow[13] = sp_total;                // total
-                dRow[14] = sp_taxper;               // pt
-                dRow[15] = sp_uniquecode;           // uniquecode
-                dRow[16] = row.ir_id;               // ir_id
-                dRow[17] = sp_mrp;                  // mrp
-                dRow[18] = 0;                       // qty_multi_unit
-                dRow[19] = 0;                       // unit_multi
-                dRow[20] = sp_srate_multiunit;      // srate_multiunit
-                dRow[21] = "";                      // narration
-                dRow[22] = 0;                       // cess
-                dRow[23] = 0;                       // ad_cess
-                dRow[24] = 0;                       // kfc
-                dRow[25] = 0;                       // support
-                dRow[26] = 0;                       // real_support
-                dRow[27] = "-1";                    // salesman
-                dRow[28] = sp_prate;                // sp_prate
-                dRow[29] = sp_realprate;            // sp_realprate
-                dRow[30] = sp_cost;                 // sp_cost
-                dRow[31] = "";                      // sp_local_exp
-                dRow[32] = 0;                       // sp_lend_amount
-                dRow[33] = "";                      // sp_discp2
-                dRow[34] = 0;                       // sp_disc2
-                dRow[35] = 0;                       // sp_netratesingle
-                dRow[36] = "";                      // sp_narration1
-                dRow[37] = 0;                       // sp_other_exp
-                dRow[38] = 0;                       // sp_print
-                dRow[39] = 0;                       // sp_card_disc
-                dRow[40] = 0;                       // sp_depreciation_per
-                dRow[41] = 0;                       // sp_depreciation
-                dRow[42] = "";                      // sp_narration2
-                dRow[43] = "";                      // sp_narration3
-                if (hasSpRowId)
+                foreach (var row in model.LendItems ?? Enumerable.Empty<LendRowModel>())
                 {
-                    dRow["sp_row_id"] = slNo;
-                    slNo++;
+                    // skip if no li_ir_id
+                    if (row?.li_ir_id == null) continue;
+
+                    var dr1 = dtlent.NewRow();
+                    dr1[0] = "0";
+                    dr1[1] = "0";
+                    dr1[2] = row.li_remarks ?? "";
+                    dr1[3] = row.li_ir_id?.ToString() ?? "-1";
+                    dr1[4] = "0";
+                    dr1[5] = "0";
+                    dtlent.Rows.Add(dr1);
                 }
-                dt1.Rows.Add(dRow);
-            }
 
-
-            // Build dtlent
-            DataTable dtlent = new DataTable();
-            dtlent.Columns.Add("li_in");
-            dtlent.Columns.Add("li_out");
-            dtlent.Columns.Add("li_remarks");
-            dtlent.Columns.Add("li_ir_id");
-            dtlent.Columns.Add("li_ift_id");
-            dtlent.Columns.Add("li_ir_mrp");
-
-            foreach (var row in model.LendItems ?? Enumerable.Empty<LendRowModel>())
-            {
-                // skip if no li_ir_id
-                if (row?.li_ir_id == null) continue;
-
-                var dr1 = dtlent.NewRow();
-                dr1[0] = "0";
-                dr1[1] = "0";
-                dr1[2] = row.li_remarks ?? "";
-                dr1[3] = row.li_ir_id?.ToString() ?? "-1";
-                dr1[4] = "0";
-                dr1[5] = "0";
-                dtlent.Rows.Add(dr1);
-            }
-
-            // Call SP
+                // Call SP
                 usqlre.OpenConnection();
 
                 using (var cmd = new SqlCommand("Sp_Sale", usqlre.shop))
@@ -5155,271 +5187,271 @@ namespace MictcoWebService.Controllers
             int tres = -6;
             try
             {
-            usqlre = new UserSqlServer(this);
-            str_id = model.isTax ? 1 : 14;
+                usqlre = new UserSqlServer(this);
+                str_id = model.isTax ? 1 : 14;
 
-            if (model.delivery_entryno <= 0)
-            {
-                return BadRequest(new
+                if (model.delivery_entryno <= 0)
                 {
-                    status = false,
-                    message = "Invalid delivery entry number."
-                });
-            }
-            // Items collected string
-            string si_items_collected = "";
-            if (model.list_itemscollected != null && model.list_itemscollected.Count > 0)
-            {
-                si_items_collected = string.Join(",", model.list_itemscollected);
-            }
+                    return BadRequest(new
+                    {
+                        status = false,
+                        message = "Invalid delivery entry number."
+                    });
+                }
+                // Items collected string
+                string si_items_collected = "";
+                if (model.list_itemscollected != null && model.list_itemscollected.Count > 0)
+                {
+                    si_items_collected = string.Join(",", model.list_itemscollected);
+                }
 
-            DataTable dt1 = new DataTable();
-            dt1.Columns.Add("qty");//0
-            dt1.Columns.Add("fqty");//1
-            dt1.Columns.Add("s_rate");//2
-            dt1.Columns.Add("real_rate");//3
-            dt1.Columns.Add("gross");//4
-            dt1.Columns.Add("disc_p");//5
-            dt1.Columns.Add("disc");//6
-            dt1.Columns.Add("real_disc");//7
-            dt1.Columns.Add("net");//8
-            dt1.Columns.Add("tax");//9
-            dt1.Columns.Add("cgst");//10
-            dt1.Columns.Add("sgst");//11
-            dt1.Columns.Add("igst");//12
-            dt1.Columns.Add("total");//13
-            dt1.Columns.Add("pt");//14
-            dt1.Columns.Add("uniquecode");//15
-            dt1.Columns.Add("ir_id");//16
-            dt1.Columns.Add("mrp");//17
-            dt1.Columns.Add("qty_multi_unit");//18
-            dt1.Columns.Add("unit_multi");//19
-            dt1.Columns.Add("srate_multiunit");//20
-            dt1.Columns.Add("narration");//21
-            dt1.Columns.Add("cess");//22
-            dt1.Columns.Add("ad_cess");//23
-            dt1.Columns.Add("kfc");//24
-            dt1.Columns.Add("support");//25
-            dt1.Columns.Add("real_support");//26
-            dt1.Columns.Add("salesman");//27
-            dt1.Columns.Add("sp_prate");//28
-            dt1.Columns.Add("sp_realprate");//29
-            dt1.Columns.Add("sp_cost");//30
-            dt1.Columns.Add("sp_local_exp");//31
-            dt1.Columns.Add("sp_lend_amount");//32
-            dt1.Columns.Add("sp_discp2");//33
-            dt1.Columns.Add("sp_disc2");//34
-            dt1.Columns.Add("sp_netratesingle");//35
-            dt1.Columns.Add("sp_narration1");//36
-            dt1.Columns.Add("sp_other_exp");//37
-            dt1.Columns.Add("sp_print");//38
-            dt1.Columns.Add("sp_card_disc");//39
-            dt1.Columns.Add("sp_depreciation_per");//40
-            dt1.Columns.Add("sp_depreciation");//41
-            dt1.Columns.Add("sp_narration2");//42
-            dt1.Columns.Add("sp_narration3");//43
-            bool hasSpRowId = Convert.ToInt32(usqlre.dbScalar(@"
+                DataTable dt1 = new DataTable();
+                dt1.Columns.Add("qty");//0
+                dt1.Columns.Add("fqty");//1
+                dt1.Columns.Add("s_rate");//2
+                dt1.Columns.Add("real_rate");//3
+                dt1.Columns.Add("gross");//4
+                dt1.Columns.Add("disc_p");//5
+                dt1.Columns.Add("disc");//6
+                dt1.Columns.Add("real_disc");//7
+                dt1.Columns.Add("net");//8
+                dt1.Columns.Add("tax");//9
+                dt1.Columns.Add("cgst");//10
+                dt1.Columns.Add("sgst");//11
+                dt1.Columns.Add("igst");//12
+                dt1.Columns.Add("total");//13
+                dt1.Columns.Add("pt");//14
+                dt1.Columns.Add("uniquecode");//15
+                dt1.Columns.Add("ir_id");//16
+                dt1.Columns.Add("mrp");//17
+                dt1.Columns.Add("qty_multi_unit");//18
+                dt1.Columns.Add("unit_multi");//19
+                dt1.Columns.Add("srate_multiunit");//20
+                dt1.Columns.Add("narration");//21
+                dt1.Columns.Add("cess");//22
+                dt1.Columns.Add("ad_cess");//23
+                dt1.Columns.Add("kfc");//24
+                dt1.Columns.Add("support");//25
+                dt1.Columns.Add("real_support");//26
+                dt1.Columns.Add("salesman");//27
+                dt1.Columns.Add("sp_prate");//28
+                dt1.Columns.Add("sp_realprate");//29
+                dt1.Columns.Add("sp_cost");//30
+                dt1.Columns.Add("sp_local_exp");//31
+                dt1.Columns.Add("sp_lend_amount");//32
+                dt1.Columns.Add("sp_discp2");//33
+                dt1.Columns.Add("sp_disc2");//34
+                dt1.Columns.Add("sp_netratesingle");//35
+                dt1.Columns.Add("sp_narration1");//36
+                dt1.Columns.Add("sp_other_exp");//37
+                dt1.Columns.Add("sp_print");//38
+                dt1.Columns.Add("sp_card_disc");//39
+                dt1.Columns.Add("sp_depreciation_per");//40
+                dt1.Columns.Add("sp_depreciation");//41
+                dt1.Columns.Add("sp_narration2");//42
+                dt1.Columns.Add("sp_narration3");//43
+                bool hasSpRowId = Convert.ToInt32(usqlre.dbScalar(@"
       SELECT COUNT(*)
       FROM INFORMATION_SCHEMA.COLUMNS
       WHERE TABLE_NAME='inv_sales_par'
       AND COLUMN_NAME='sp_row_id'")) > 0;
 
-            if (hasSpRowId)
-            {
-                dt1.Columns.Add("sp_row_id");
-            }
-            int slNo = 1;
-            // Populate dt1 from model.Items
-            foreach (var row in model.Items ?? Enumerable.Empty<ItemRowModel>())
-            {
-                // Use slno presence as indicator, if null skip
-                if (row == null || row.ir_id == null)
-                    continue;
-                // 🔹 STEP 1: Check service item
-                string chkServiceSql = "select ir_service_item, ir_taxper from inv_item_reg where ir_id=" + row.ir_id;
-                DataTable dtService = usqlre.dbReaderFill(chkServiceSql);
-                int isService = 0;
-                if (dtService.Rows.Count > 0)
-                    isService = Convert.ToInt32(dtService.Rows[0]["ir_service_item"]);
-                decimal sp_rate = 0, sp_realrate = 0, sp_gross = 0,
-                sp_net = 0, sp_tax = 0, sp_total = 0,
-                sp_igst = 0, sp_cgst = 0, sp_sgst = 0, sp_disc = 0,
-                sp_mrp = 0, sp_srate_multiunit = 0,
-                sp_prate = 0, sp_realprate = 0, sp_cost = 0, sp_taxper = 0;
-                long sp_uniquecode = 0;
-                if (isService == 1)
+                if (hasSpRowId)
                 {
-                    sp_taxper = dtService.Rows[0]["ir_taxper"] != DBNull.Value
-                ? Convert.ToDecimal(dtService.Rows[0]["ir_taxper"])
-                : 0;
-
-                    decimal total = row.total ?? 0;
-
-                    if (sp_taxper > 0 && model.isTax)
-                    {
-                        // 🔹 TAX INCLUDED CALCULATION
-                        decimal baseAmount = Math.Round(total / (1 + (sp_taxper / 100)), 2);
-                        decimal taxAmount = Math.Round(total - baseAmount, 2);
-
-                        sp_rate = total;
-                        sp_realrate = baseAmount;
-                        sp_gross = total;
-                        sp_net = baseAmount;
-                        sp_tax = taxAmount;
-                        sp_total = total;
-
-                        // 🔹 Split GST (assuming intra-state)
-                        sp_cgst = Math.Round(taxAmount / 2, 3);
-                        sp_sgst = Math.Round(taxAmount / 2, 3);
-
-                        sp_igst = 0;
-                    }
-                    else
-                    {
-                        // 🔹 NO TAX OR TAX OFF
-                        sp_rate = total;
-                        sp_realrate = total;
-                        sp_gross = total;
-                        sp_net = total;
-                        sp_tax = 0;
-                        sp_total = total;
-
-                        sp_cgst = 0;
-                        sp_sgst = 0;
-                        sp_igst = 0;
-                    }
-
-                    sp_disc = row.discount ?? 0;
+                    dt1.Columns.Add("sp_row_id");
                 }
-                else
+                int slNo = 1;
+                // Populate dt1 from model.Items
+                foreach (var row in model.Items ?? Enumerable.Empty<ItemRowModel>())
                 {
-                    string sql = @"select top 1 sp_uniquecode,sp_rate,sp_realrate, sp_gross_value,sp_disc,sp_net_amount,sp_tax,sp_total,sp_igst,sp_cgst,sp_sgst,sp_mrp,sp_srate_multiunit,sp_prate,sp_realprate,sp_cost,sp_taxper from inv_sales_par where sp_str_id=12 and sp_entryno=" + model.ticket_id + " and sp_ir_id=" + row.ir_id + "";
-
-                    DataTable dt = usqlre.dbReaderFill(sql);
-
-
-
-                    if (dt != null && dt.Rows.Count > 0)
+                    // Use slno presence as indicator, if null skip
+                    if (row == null || row.ir_id == null)
+                        continue;
+                    // 🔹 STEP 1: Check service item
+                    string chkServiceSql = "select ir_service_item, ir_taxper from inv_item_reg where ir_id=" + row.ir_id;
+                    DataTable dtService = usqlre.dbReaderFill(chkServiceSql);
+                    int isService = 0;
+                    if (dtService.Rows.Count > 0)
+                        isService = Convert.ToInt32(dtService.Rows[0]["ir_service_item"]);
+                    decimal sp_rate = 0, sp_realrate = 0, sp_gross = 0,
+                    sp_net = 0, sp_tax = 0, sp_total = 0,
+                    sp_igst = 0, sp_cgst = 0, sp_sgst = 0, sp_disc = 0,
+                    sp_mrp = 0, sp_srate_multiunit = 0,
+                    sp_prate = 0, sp_realprate = 0, sp_cost = 0, sp_taxper = 0;
+                    long sp_uniquecode = 0;
+                    if (isService == 1)
                     {
-                        DataRow salesRow = dt.Rows[0];
+                        sp_taxper = dtService.Rows[0]["ir_taxper"] != DBNull.Value
+                    ? Convert.ToDecimal(dtService.Rows[0]["ir_taxper"])
+                    : 0;
 
-                        sp_uniquecode = Convert.ToInt64(salesRow["sp_uniquecode"]);
-                        sp_rate = Convert.ToDecimal(salesRow["sp_rate"]);
-                        sp_realrate = Convert.ToDecimal(salesRow["sp_realrate"]);
-                        sp_gross = Convert.ToDecimal(salesRow["sp_gross_value"]);
-                        sp_disc = Convert.ToDecimal(salesRow["sp_disc"]);
-                        sp_net = Convert.ToDecimal(salesRow["sp_net_amount"]);
-                        sp_tax = Convert.ToDecimal(salesRow["sp_tax"]);
-                        sp_total = Convert.ToDecimal(salesRow["sp_total"]);
-                        sp_igst = Convert.ToDecimal(salesRow["sp_igst"]);
-                        sp_cgst = Convert.ToDecimal(salesRow["sp_cgst"]);
-                        sp_sgst = Convert.ToDecimal(salesRow["sp_sgst"]);
-                        sp_mrp = Convert.ToDecimal(salesRow["sp_mrp"]);
-                        sp_srate_multiunit = Convert.ToDecimal(salesRow["sp_srate_multiunit"]);
-                        sp_prate = Convert.ToDecimal(salesRow["sp_prate"]);
-                        sp_realprate = Convert.ToDecimal(salesRow["sp_realprate"]);
-                        sp_cost = Convert.ToDecimal(salesRow["sp_cost"]);
-                        sp_taxper = Convert.ToDecimal(salesRow["sp_taxper"]);
-                        if (!model.isTax)
+                        decimal total = row.total ?? 0;
+
+                        if (sp_taxper > 0 && model.isTax)
                         {
+                            // 🔹 TAX INCLUDED CALCULATION
+                            decimal baseAmount = Math.Round(total / (1 + (sp_taxper / 100)), 2);
+                            decimal taxAmount = Math.Round(total - baseAmount, 2);
+
+                            sp_rate = total;
+                            sp_realrate = baseAmount;
+                            sp_gross = total;
+                            sp_net = baseAmount;
+                            sp_tax = taxAmount;
+                            sp_total = total;
+
+                            // 🔹 Split GST (assuming intra-state)
+                            sp_cgst = Math.Round(taxAmount / 2, 3);
+                            sp_sgst = Math.Round(taxAmount / 2, 3);
+
+                            sp_igst = 0;
+                        }
+                        else
+                        {
+                            // 🔹 NO TAX OR TAX OFF
+                            sp_rate = total;
+                            sp_realrate = total;
+                            sp_gross = total;
+                            sp_net = total;
                             sp_tax = 0;
+                            sp_total = total;
+
                             sp_cgst = 0;
                             sp_sgst = 0;
                             sp_igst = 0;
-                            sp_srate_multiunit = 0;
+                        }
 
-                            // Net should be equal to total (no tax split)
-                            sp_rate = sp_rate;
-                            sp_realrate = sp_rate;
-                            sp_net = sp_total;
-                            sp_gross = sp_total;
+                        sp_disc = row.discount ?? 0;
+                    }
+                    else
+                    {
+                        string sql = @"select top 1 sp_uniquecode,sp_rate,sp_realrate, sp_gross_value,sp_disc,sp_net_amount,sp_tax,sp_total,sp_igst,sp_cgst,sp_sgst,sp_mrp,sp_srate_multiunit,sp_prate,sp_realprate,sp_cost,sp_taxper from inv_sales_par where sp_str_id=12 and sp_entryno=" + model.ticket_id + " and sp_ir_id=" + row.ir_id + "";
+
+                        DataTable dt = usqlre.dbReaderFill(sql);
 
 
+
+                        if (dt != null && dt.Rows.Count > 0)
+                        {
+                            DataRow salesRow = dt.Rows[0];
+
+                            sp_uniquecode = Convert.ToInt64(salesRow["sp_uniquecode"]);
+                            sp_rate = Convert.ToDecimal(salesRow["sp_rate"]);
+                            sp_realrate = Convert.ToDecimal(salesRow["sp_realrate"]);
+                            sp_gross = Convert.ToDecimal(salesRow["sp_gross_value"]);
+                            sp_disc = Convert.ToDecimal(salesRow["sp_disc"]);
+                            sp_net = Convert.ToDecimal(salesRow["sp_net_amount"]);
+                            sp_tax = Convert.ToDecimal(salesRow["sp_tax"]);
+                            sp_total = Convert.ToDecimal(salesRow["sp_total"]);
+                            sp_igst = Convert.ToDecimal(salesRow["sp_igst"]);
+                            sp_cgst = Convert.ToDecimal(salesRow["sp_cgst"]);
+                            sp_sgst = Convert.ToDecimal(salesRow["sp_sgst"]);
+                            sp_mrp = Convert.ToDecimal(salesRow["sp_mrp"]);
+                            sp_srate_multiunit = Convert.ToDecimal(salesRow["sp_srate_multiunit"]);
+                            sp_prate = Convert.ToDecimal(salesRow["sp_prate"]);
+                            sp_realprate = Convert.ToDecimal(salesRow["sp_realprate"]);
+                            sp_cost = Convert.ToDecimal(salesRow["sp_cost"]);
+                            sp_taxper = Convert.ToDecimal(salesRow["sp_taxper"]);
+                            if (!model.isTax)
+                            {
+                                sp_tax = 0;
+                                sp_cgst = 0;
+                                sp_sgst = 0;
+                                sp_igst = 0;
+                                sp_srate_multiunit = 0;
+
+                                // Net should be equal to total (no tax split)
+                                sp_rate = sp_rate;
+                                sp_realrate = sp_rate;
+                                sp_net = sp_total;
+                                sp_gross = sp_total;
+
+
+                            }
                         }
                     }
+
+
+                    DataRow dRow = dt1.NewRow();
+
+                    dRow[0] = row.qty;                 // qty
+                    dRow[1] = 0;                       // fqty
+                    dRow[2] = sp_rate;                 // s_rate
+                    dRow[3] = sp_realrate;             // real_rate
+                    dRow[4] = sp_gross;                // gross
+                    dRow[5] = 0;                       // disc_p
+                    dRow[6] = sp_disc;                 // disc
+                    dRow[7] = 0;                       // real_disc
+                    dRow[8] = sp_net;                  // net
+                    dRow[9] = sp_tax;                  // tax
+                    dRow[10] = sp_cgst;                 // cgst
+                    dRow[11] = sp_sgst;                 // sgst
+                    dRow[12] = sp_igst;                 // igst
+                    dRow[13] = sp_total;                // total
+                    dRow[14] = sp_taxper;               // pt
+                    dRow[15] = sp_uniquecode;           // uniquecode
+                    dRow[16] = row.ir_id;               // ir_id
+                    dRow[17] = sp_mrp;                  // mrp
+                    dRow[18] = 0;                       // qty_multi_unit
+                    dRow[19] = 0;                       // unit_multi
+                    dRow[20] = sp_srate_multiunit;      // srate_multiunit
+                    dRow[21] = "";                      // narration
+                    dRow[22] = 0;                       // cess
+                    dRow[23] = 0;                       // ad_cess
+                    dRow[24] = 0;                       // kfc
+                    dRow[25] = 0;                       // support
+                    dRow[26] = 0;                       // real_support
+                    dRow[27] = "-1";                    // salesman
+                    dRow[28] = sp_prate;                // sp_prate
+                    dRow[29] = sp_realprate;            // sp_realprate
+                    dRow[30] = sp_cost;                 // sp_cost
+                    dRow[31] = "";                      // sp_local_exp
+                    dRow[32] = 0;                       // sp_lend_amount
+                    dRow[33] = "";                      // sp_discp2
+                    dRow[34] = 0;                       // sp_disc2
+                    dRow[35] = 0;                       // sp_netratesingle
+                    dRow[36] = "";                      // sp_narration1
+                    dRow[37] = 0;                       // sp_other_exp
+                    dRow[38] = 0;                       // sp_print
+                    dRow[39] = 0;                       // sp_card_disc
+                    dRow[40] = 0;                       // sp_depreciation_per
+                    dRow[41] = 0;                       // sp_depreciation
+                    dRow[42] = "";                      // sp_narration2
+                    dRow[43] = "";                      // sp_narration3
+                    if (hasSpRowId)
+                    {
+                        dRow["sp_row_id"] = slNo;
+                        slNo++;
+                    }
+                    dt1.Rows.Add(dRow);
                 }
 
 
-                DataRow dRow = dt1.NewRow();
+                // Build dtlent
+                DataTable dtlent = new DataTable();
+                dtlent.Columns.Add("li_in");
+                dtlent.Columns.Add("li_out");
+                dtlent.Columns.Add("li_remarks");
+                dtlent.Columns.Add("li_ir_id");
+                dtlent.Columns.Add("li_ift_id");
+                dtlent.Columns.Add("li_ir_mrp");
 
-                dRow[0] = row.qty;                 // qty
-                dRow[1] = 0;                       // fqty
-                dRow[2] = sp_rate;                 // s_rate
-                dRow[3] = sp_realrate;             // real_rate
-                dRow[4] = sp_gross;                // gross
-                dRow[5] = 0;                       // disc_p
-                dRow[6] = sp_disc;                 // disc
-                dRow[7] = 0;                       // real_disc
-                dRow[8] = sp_net;                  // net
-                dRow[9] = sp_tax;                  // tax
-                dRow[10] = sp_cgst;                 // cgst
-                dRow[11] = sp_sgst;                 // sgst
-                dRow[12] = sp_igst;                 // igst
-                dRow[13] = sp_total;                // total
-                dRow[14] = sp_taxper;               // pt
-                dRow[15] = sp_uniquecode;           // uniquecode
-                dRow[16] = row.ir_id;               // ir_id
-                dRow[17] = sp_mrp;                  // mrp
-                dRow[18] = 0;                       // qty_multi_unit
-                dRow[19] = 0;                       // unit_multi
-                dRow[20] = sp_srate_multiunit;      // srate_multiunit
-                dRow[21] = "";                      // narration
-                dRow[22] = 0;                       // cess
-                dRow[23] = 0;                       // ad_cess
-                dRow[24] = 0;                       // kfc
-                dRow[25] = 0;                       // support
-                dRow[26] = 0;                       // real_support
-                dRow[27] = "-1";                    // salesman
-                dRow[28] = sp_prate;                // sp_prate
-                dRow[29] = sp_realprate;            // sp_realprate
-                dRow[30] = sp_cost;                 // sp_cost
-                dRow[31] = "";                      // sp_local_exp
-                dRow[32] = 0;                       // sp_lend_amount
-                dRow[33] = "";                      // sp_discp2
-                dRow[34] = 0;                       // sp_disc2
-                dRow[35] = 0;                       // sp_netratesingle
-                dRow[36] = "";                      // sp_narration1
-                dRow[37] = 0;                       // sp_other_exp
-                dRow[38] = 0;                       // sp_print
-                dRow[39] = 0;                       // sp_card_disc
-                dRow[40] = 0;                       // sp_depreciation_per
-                dRow[41] = 0;                       // sp_depreciation
-                dRow[42] = "";                      // sp_narration2
-                dRow[43] = "";                      // sp_narration3
-                if (hasSpRowId)
+                foreach (var row in model.LendItems ?? Enumerable.Empty<LendRowModel>())
                 {
-                    dRow["sp_row_id"] = slNo;
-                    slNo++;
+                    // skip if no li_ir_id
+                    if (row?.li_ir_id == null) continue;
+
+                    var dr1 = dtlent.NewRow();
+                    dr1[0] = "0";
+                    dr1[1] = "0";
+                    dr1[2] = row.li_remarks ?? "";
+                    dr1[3] = row.li_ir_id?.ToString() ?? "-1";
+                    dr1[4] = "0";
+                    dr1[5] = "0";
+                    dtlent.Rows.Add(dr1);
                 }
-                dt1.Rows.Add(dRow);
-            }
 
-
-            // Build dtlent
-            DataTable dtlent = new DataTable();
-            dtlent.Columns.Add("li_in");
-            dtlent.Columns.Add("li_out");
-            dtlent.Columns.Add("li_remarks");
-            dtlent.Columns.Add("li_ir_id");
-            dtlent.Columns.Add("li_ift_id");
-            dtlent.Columns.Add("li_ir_mrp");
-
-            foreach (var row in model.LendItems ?? Enumerable.Empty<LendRowModel>())
-            {
-                // skip if no li_ir_id
-                if (row?.li_ir_id == null) continue;
-
-                var dr1 = dtlent.NewRow();
-                dr1[0] = "0";
-                dr1[1] = "0";
-                dr1[2] = row.li_remarks ?? "";
-                dr1[3] = row.li_ir_id?.ToString() ?? "-1";
-                dr1[4] = "0";
-                dr1[5] = "0";
-                dtlent.Rows.Add(dr1);
-            }
-
-            // Call SP
+                // Call SP
                 usqlre.OpenConnection();
 
                 using (var cmd = new SqlCommand("Sp_Sale", usqlre.shop))
@@ -7179,8 +7211,7 @@ namespace MictcoWebService.Controllers
             }
             finally
             {
-                if (usqlre != null)
-                    usqlre.close();
+                usqlre?.close();
             }
         }
 
@@ -7368,8 +7399,7 @@ namespace MictcoWebService.Controllers
             }
             finally
             {
-                if (usqlre != null)
-                    usqlre.close();
+                usqlre?.close();
             }
         }
 
@@ -7559,8 +7589,7 @@ namespace MictcoWebService.Controllers
             }
             finally
             {
-                if (usqlre != null)
-                    usqlre.ReleaseConnection();
+                usqlre?.ReleaseConnection();
             }
         }
 
@@ -7689,6 +7718,10 @@ namespace MictcoWebService.Controllers
                     data = (object)null
                 });
             }
+            finally
+            {
+                usqlre?.ReleaseConnection();
+            }   
         }
         [HttpPost("technician-loss-report")]
         public async Task<IActionResult> TechnicianLossReport([FromBody] TechnicianLossReportModel model)
@@ -7871,8 +7904,7 @@ namespace MictcoWebService.Controllers
             }
             finally
             {
-                if (usqlre != null)
-                    usqlre.close();
+                usqlre?.close();
             }
         }
 
@@ -7882,6 +7914,7 @@ namespace MictcoWebService.Controllers
         {
             var cancellationToken = HttpContext.RequestAborted;
             UserSqlServer usqlre = null;
+
             try
             {
                 usqlre = new UserSqlServer(this);

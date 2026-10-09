@@ -240,6 +240,7 @@ namespace MictcoWebService.Common
             }
             catch (Exception ex)
             {
+                Console.WriteLine(ex.ToString());
                 lastError = ex.Message;
             }
         }
