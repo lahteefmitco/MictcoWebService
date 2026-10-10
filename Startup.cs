@@ -125,9 +125,16 @@ namespace MictcoWebService
                 });
             ////}
 
-            app.UseHttpsRedirection();
+            // HTTP remotes (e.g. :3040) have no HTTPS listener. Redirecting
+            // /serviceAppHub negotiate to https:// breaks SignalR clients.
+            app.UseWhen(
+                context =>
+                    !context.Request.Path.StartsWithSegments("/serviceAppHub") &&
+                    !context.Request.Path.StartsWithSegments("/ecommerceHub"),
+                branch => branch.UseHttpsRedirection());
             app.UseStaticFiles();
             app.UseRouting();
+            app.UseWebSockets();
             app.Use(async (context, next) =>
             {
                 if (context.Request.Headers.ContainsKey("Access-Control-Request-Private-Network"))
