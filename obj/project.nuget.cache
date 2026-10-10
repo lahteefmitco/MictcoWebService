@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "dgSpecHash": "OiZQFkch06ct0DkGwAVTwiE4AJsODQmSUmZwGYRJXNwwJ+AKspNxcEADtT2QmB7nkVZHDegVqBZyn6mfVT9tYA==",
+  "dgSpecHash": "N/7fYxin2Vw=",
   "success": true,
   "projectFilePath": "/Users/mictco/works/OditBizErp_Api---Orginal-cancelation-of-request/MictcoWebService/MictcoWebService.csproj",
   "expectedPackageFiles": [
@@ -244,5 +244,62 @@
     "/Users/mictco/.nuget/packages/microsoft.netcore.app.host.win-x64/7.0.20/microsoft.netcore.app.host.win-x64.7.0.20.nupkg.sha512",
     "/Users/mictco/.nuget/packages/microsoft.netcore.app.host.linux-x64/7.0.20/microsoft.netcore.app.host.linux-x64.7.0.20.nupkg.sha512"
   ],
-  "logs": []
+  "logs": [
+    {
+      "code": "NU1902",
+      "level": "Warning",
+      "message": "Package 'Microsoft.AspNetCore.Authentication.JwtBearer' 5.0.8 has a known moderate severity vulnerability, https://github.com/advisories/GHSA-q7cg-43mg-qp69",
+      "projectPath": "/Users/mictco/works/OditBizErp_Api---Orginal-cancelation-of-request/MictcoWebService/MictcoWebService.csproj",
+      "warningLevel": 1,
+      "filePath": "/Users/mictco/works/OditBizErp_Api---Orginal-cancelation-of-request/MictcoWebService/MictcoWebService.csproj",
+      "libraryId": "Microsoft.AspNetCore.Authentication.JwtBearer",
+      "targetGraphs": [
+        "net7.0",
+        "net7.0/linux-x64",
+        "net7.0/win10-x64"
+      ]
+    },
+    {
+      "code": "NU1902",
+      "level": "Warning",
+      "message": "Package 'System.Data.SqlClient' 4.8.2 has a known moderate severity vulnerability, https://github.com/advisories/GHSA-8g2p-5pqh-5jmc",
+      "projectPath": "/Users/mictco/works/OditBizErp_Api---Orginal-cancelation-of-request/MictcoWebService/MictcoWebService.csproj",
+      "warningLevel": 1,
+      "filePath": "/Users/mictco/works/OditBizErp_Api---Orginal-cancelation-of-request/MictcoWebService/MictcoWebService.csproj",
+      "libraryId": "System.Data.SqlClient",
+      "targetGraphs": [
+        "net7.0",
+        "net7.0/linux-x64",
+        "net7.0/win10-x64"
+      ]
+    },
+    {
+      "code": "NU1903",
+      "level": "Warning",
+      "message": "Package 'System.Data.SqlClient' 4.8.2 has a known high severity vulnerability, https://github.com/advisories/GHSA-98g6-xh36-x2p7",
+      "projectPath": "/Users/mictco/works/OditBizErp_Api---Orginal-cancelation-of-request/MictcoWebService/MictcoWebService.csproj",
+      "warningLevel": 1,
+      "filePath": "/Users/mictco/works/OditBizErp_Api---Orginal-cancelation-of-request/MictcoWebService/MictcoWebService.csproj",
+      "libraryId": "System.Data.SqlClient",
+      "targetGraphs": [
+        "net7.0",
+        "net7.0/linux-x64",
+        "net7.0/win10-x64"
+      ]
+    },
+    {
+      "code": "NU1902",
+      "level": "Warning",
+      "message": "Package 'System.IdentityModel.Tokens.Jwt' 6.12.0 has a known moderate severity vulnerability, https://github.com/advisories/GHSA-59j7-ghrg-fj52",
+      "projectPath": "/Users/mictco/works/OditBizErp_Api---Orginal-cancelation-of-request/MictcoWebService/MictcoWebService.csproj",
+      "warningLevel": 1,
+      "filePath": "/Users/mictco/works/OditBizErp_Api---Orginal-cancelation-of-request/MictcoWebService/MictcoWebService.csproj",
+      "libraryId": "System.IdentityModel.Tokens.Jwt",
+      "targetGraphs": [
+        "net7.0",
+        "net7.0/linux-x64",
+        "net7.0/win10-x64"
+      ]
+    }
+  ]
 }

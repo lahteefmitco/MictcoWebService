@@ -1,10 +1,12 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore.Metadata.Internal;
 using Microsoft.VisualBasic;
 using MictcoWebService.Authentication;
 using MictcoWebService.Common;
+using MictcoWebService.Hubs;
 using MictcoWebService.Models;
 using Newtonsoft.Json;                                                    //SHAHIL//
 using System;
@@ -32,6 +34,38 @@ namespace MictcoWebService.Controllers
         /// 10 concurrent is enough to keep the API responsive without overloading DB.
         /// </summary>
         private static readonly SemaphoreSlim _ticketQueryThrottle = new SemaphoreSlim(10, 10);
+
+        private readonly IHubContext<ServiceAppHub> _hubContext;
+
+        public ServiceAppController(IHubContext<ServiceAppHub> hubContext)
+        {
+            _hubContext = hubContext;
+        }
+
+        /// <summary>
+        /// Notifies connected SignalR clients about a general-remarks operation.
+        /// Sent to everyone listening on "ReceiveGeneralRemarksUpdate".
+        /// Never throws: a failed notification must not fail the API call.
+        /// Only metadata is sent (no remarks text) because the hub is not authenticated.
+        /// </summary>
+        private async Task NotifyGeneralRemarksAsync(string action, int ticketId)
+        {
+            try
+            {
+                var payload = new
+                {
+                    action,                       // "updated" | "fetched"
+                    ticket_id = ticketId,
+                    timestamp = DateTime.UtcNow
+                };
+
+                await _hubContext.Clients.All.SendAsync("ReceiveGeneralRemarksUpdate", payload);
+            }
+            catch (Exception)
+            {
+                // Swallow: real-time notification is best-effort.
+            }
+        }
 
         // ---------------------------------------------------
         // INSERT
@@ -2808,6 +2842,8 @@ namespace MictcoWebService.Controllers
                     data = dt
                 };
 
+                await NotifyGeneralRemarksAsync("updated", model.ticket_id);
+
                 return Content(Newtonsoft.Json.JsonConvert.SerializeObject(responseObj), "application/json");
             }
             catch (SqlException sqlEx)
@@ -2869,6 +2905,8 @@ namespace MictcoWebService.Controllers
                     message = "get successfully",
                     data = dt
                 };
+
+              //  await NotifyGeneralRemarksAsync("fetched", ticket_id);
 
                 return Content(Newtonsoft.Json.JsonConvert.SerializeObject(responseObj), "application/json");
             }
