@@ -1,16 +1,12 @@
 ﻿using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.CodeAnalysis;
 using MictcoWebService.Authentication;
 using MictcoWebService.Common;
 using MictcoWebService.Models;
 using System;
 using System.Collections.Generic;
 using System.Data;
-using System.Linq;
-using System.Security.Cryptography;
-using System.Text.RegularExpressions;
+using System.Data.SqlClient;
 using System.Threading.Tasks;
 
 namespace MictcoWebService.Controllers
@@ -21,18 +17,22 @@ namespace MictcoWebService.Controllers
     {
 
         [HttpGet("product-details/{id}")]
-        public string productDetailsById(int id)
+        public async Task<IActionResult> productDetailsById(int id)
         {
-            UserSqlServer usqlre = new UserSqlServer(this);
-            Dictionary<string, DataTable> hash = new Dictionary<string, DataTable>();
-
-            bool LOCATIONWISEPRODUCT = false;
-            if (usqlre.get_android_settings("LOCATION WISE PRODUCT"))
+            var cancellationToken = HttpContext.RequestAborted;
+            UserSqlServer usqlre = null;
+            try
             {
-                LOCATIONWISEPRODUCT = true;
-            }
+                usqlre = new UserSqlServer(this);
+                Dictionary<string, DataTable> hash = new Dictionary<string, DataTable>();
 
-            string sql = @"SELECT inv_item_reg.ir_id,ir_name,ir_cgst,ir_sgst,ISNULL(cast(qty as nvarchar(100)), '0') qty,uniquecode,ISNULL(cast(prate as nvarchar(100)), '0') prate,ISNULL(cast(mrp as nvarchar(100)), '0') mrp,
+                bool LOCATIONWISEPRODUCT = false;
+                if (usqlre.get_android_settings("LOCATION WISE PRODUCT"))
+                {
+                    LOCATIONWISEPRODUCT = true;
+                }
+
+                string sql = @"SELECT inv_item_reg.ir_id,ir_name,ir_cgst,ir_sgst,ISNULL(cast(qty as nvarchar(100)), '0') qty,uniquecode,ISNULL(cast(prate as nvarchar(100)), '0') prate,ISNULL(cast(mrp as nvarchar(100)), '0') mrp,
                         ISNULL(cast(wholesale as nvarchar(100)), '0') wholesale,ISNULL(cast(spretail as nvarchar(100)), '0') spretail,
                         ISNULL(cast(branch as nvarchar(100)), '0') branch,ISNULL(cast(retail as nvarchar(100)), '0') retail,
                         ISNULL(cast(realprate as nvarchar(100)), '0') realprate,ISNULL(cast(R1 as nvarchar(100)), '0') R1,
@@ -44,19 +44,56 @@ namespace MictcoWebService.Controllers
                         from View_Stock inner join inv_item_reg on
                         inv_item_reg.ir_id = View_Stock.ir_id inner join gnl_location on View_Stock.location_id=gl_id 
                         left join acc_subhead on as_id= Sup WHERE inv_item_reg.ir_id = " + id + "";
-            if(LOCATIONWISEPRODUCT && usqlre.user_role!="ADMIN")
-               sql += "and location_id = '" + usqlre.locationId + "'";
-            DataTable dt = usqlre.dbReaderFill(sql);
-            hash.Add("product", dt);
-            sql = "SELECT m.im_id as value,m.im_unit_id,m.im_conversion,u.u_name as label,ISNULL(cast(m.im_rate as nvarchar(100)),'0') im_rate,ISNULL(cast(m.im_loading_charge as nvarchar(100)),'0') im_loading_charge,ISNULL(cast(m.im_retail as nvarchar(100)),'0') im_retail,ISNULL(cast(m.im_wsale as nvarchar(100)),'0') im_wsale,ISNULL(cast(m.im_spretail as nvarchar(100)),'0') im_spretail,ISNULL(cast(m.im_branch as nvarchar(100)),'0') im_branch from inv_multi_unit m inner join inv_unit u on m.im_unit_id=u.u_id where im_ir_id='" + id + "' order by m.im_conversion ASC";
-            dt = usqlre.dbReaderFill(sql);
-            hash.Add("multi", dt);
+                if (LOCATIONWISEPRODUCT && usqlre.user_role != "ADMIN")
+                    sql += "and location_id = '" + usqlre.locationId + "'";
+                DataTable dt = await usqlre.dbReaderFillAsync(sql, cancellationToken);
+                hash.Add("product", dt);
+                sql = "SELECT m.im_id as value,m.im_unit_id,m.im_conversion,u.u_name as label,ISNULL(cast(m.im_rate as nvarchar(100)),'0') im_rate,ISNULL(cast(m.im_loading_charge as nvarchar(100)),'0') im_loading_charge,ISNULL(cast(m.im_retail as nvarchar(100)),'0') im_retail,ISNULL(cast(m.im_wsale as nvarchar(100)),'0') im_wsale,ISNULL(cast(m.im_spretail as nvarchar(100)),'0') im_spretail,ISNULL(cast(m.im_branch as nvarchar(100)),'0') im_branch from inv_multi_unit m inner join inv_unit u on m.im_unit_id=u.u_id where im_ir_id='" + id + "' order by m.im_conversion ASC";
+                dt = await usqlre.dbReaderFillAsync(sql, cancellationToken);
+                hash.Add("multi", dt);
 
-            sql = "select top (4) sp_rate ,si_entryno ,si_date  from inv_sales_par inner join inv_sales_inf on si_entryno=sp_entryno where sp_ir_id = '" + id + "' order by sp_entryno desc";
-            dt = usqlre.dbReaderFill(sql);
-            hash.Add("lastRate", dt);
-            usqlre.close();
-            return ReportModelContext.searializeDt(hash);
+                sql = "select top (4) sp_rate ,si_entryno ,si_date  from inv_sales_par inner join inv_sales_inf on si_entryno=sp_entryno where sp_ir_id = '" + id + "' order by sp_entryno desc";
+                dt = await usqlre.dbReaderFillAsync(sql, cancellationToken);
+                hash.Add("lastRate", dt);
+                return Content(ReportModelContext.searializeDt(hash), "application/json");
+            }
+            catch (OperationCanceledException)
+            {
+                return StatusCode(499);
+            }
+            catch (SqlException) when (cancellationToken.IsCancellationRequested)
+            {
+                return StatusCode(499);
+            }
+            catch (Exception) when (cancellationToken.IsCancellationRequested)
+            {
+                return StatusCode(499);
+            }
+            catch (SqlException ex)
+            {
+                Console.WriteLine("SqlException: " + ex.ToString());
+                return StatusCode(422, new
+                {
+                    status = false,
+                    statusCode = 422,
+                    message = ex.Message,
+                    data = (object)null
+                });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new
+                {
+                    status = false,
+                    statusCode = 500,
+                    message = ex.Message,
+                    data = (object)null
+                });
+            }
+            finally
+            {
+                usqlre?.close();
+            }
         }
         //new product details 
         [HttpGet("product-details-oditbiz/{id}/{cId}/{strId}")]

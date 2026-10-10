@@ -3133,7 +3133,7 @@ namespace MictcoWebService.Controllers
                 finally
                 {
                     usqlre.ReleaseConnection();
-                  //  _ticketQueryThrottle.Release();
+                    _ticketQueryThrottle.Release();
                 }
 
 
@@ -3306,7 +3306,7 @@ namespace MictcoWebService.Controllers
             }
             finally
             {
-                _ticketQueryThrottle.Release();
+               // _ticketQueryThrottle.Release();
                 usqlre?.ReleaseConnection();
 
             }

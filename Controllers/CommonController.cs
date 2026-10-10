@@ -5400,11 +5400,13 @@ GROUP BY a.as_id";
         //    }
         //}
         [HttpGet("get-android-settings")]
-        public IActionResult GetAndroidSettings(string search = null, int? service = null)
+        public async Task<IActionResult> GetAndroidSettings(string search = null, int? service = null)
         {
+            var cancellationToken = HttpContext.RequestAborted;
+            UserSqlServer usqlre = null;
             try
             {
-                UserSqlServer usqlre = new UserSqlServer(this);
+                usqlre = new UserSqlServer(this);
                 usqlre.ensure_android_settings_columns();
 
                 string sql = @"
@@ -5433,10 +5435,32 @@ GROUP BY a.as_id";
 
                 sql += " ORDER BY ans_name";
 
-                DataTable dt = usqlre.dbReaderFill(sql);
-                usqlre.close();
+                DataTable dt = await usqlre.dbReaderFillAsync(sql, cancellationToken);
 
                 return Ok(ReportModelContext.searializeDt(dt));
+            }
+            catch (OperationCanceledException)
+            {
+                return StatusCode(499);
+            }
+            catch (SqlException) when (cancellationToken.IsCancellationRequested)
+            {
+                return StatusCode(499);
+            }
+            catch (Exception) when (cancellationToken.IsCancellationRequested)
+            {
+                return StatusCode(499);
+            }
+            catch (SqlException ex)
+            {
+                Console.WriteLine("SqlException: " + ex.ToString());
+                return StatusCode(422, new
+                {
+                    status = false,
+                    statusCode = 422,
+                    message = ex.Message,
+                    data = (object)null
+                });
             }
             catch (Exception)
             {
@@ -5446,11 +5470,16 @@ GROUP BY a.as_id";
                     error = "An error occurred while fetching android settings."
                 });
             }
+            finally
+            {
+                usqlre?.close();
+            }
         }
 
         [HttpPost("update-android-settings")]
         public IActionResult UpdateAndroidSettings([FromBody] AndroidSettingsModel model)
         {
+            UserSqlServer usqlre = null;
             try
             {
                 if (model == null || model.ans_id <= 0)
@@ -5460,7 +5489,7 @@ GROUP BY a.as_id";
                 if (!string.IsNullOrEmpty(usedBy) && usedBy != "BACKEND" && usedBy != "FRONTEND" && usedBy != "BOTH")
                     return Ok(new { status = false, message = "ans_used_by must be BACKEND, FRONTEND or BOTH" });
 
-                UserSqlServer usqlre = new UserSqlServer(this);
+                usqlre = new UserSqlServer(this);
                 usqlre.ensure_android_settings_columns();
 
                 string remark = (model.ans_remark ?? "").Replace("'", "''");
@@ -5473,13 +5502,34 @@ GROUP BY a.as_id";
                     sql += ", ans_used_by = '" + usedBy + "'";
                 sql += " WHERE ans_id = " + model.ans_id;
 
-                bool ok = usqlre.dbExecute(sql);
-                usqlre.close();
-                return Ok(new { status = ok });
+                if (!usqlre.OpenConnection())
+                    throw new InvalidOperationException(string.IsNullOrWhiteSpace(usqlre.lastError) ? "Database connection failed." : usqlre.lastError);
+
+                using (SqlCommand cmd = new SqlCommand(sql, usqlre.shop))
+                {
+                    cmd.CommandTimeout = 60;
+                    cmd.ExecuteNonQuery();
+                }
+                return Ok(new { status = true });
+            }
+            catch (SqlException ex)
+            {
+                Console.WriteLine("SqlException: " + ex.ToString());
+                return StatusCode(422, new
+                {
+                    status = false,
+                    statusCode = 422,
+                    message = ex.Message,
+                    data = (object)null
+                });
             }
             catch (Exception)
             {
                 return StatusCode(500, new { status = false, error = "An error occurred while updating android settings." });
+            }
+            finally
+            {
+                usqlre?.close();
             }
         }
 
