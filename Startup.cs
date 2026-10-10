@@ -144,6 +144,7 @@ namespace MictcoWebService
                 endpoints.MapControllers();
                 // Register hub route
                 endpoints.MapHub<Hubs.EcommerceHub>("/ecommerceHub");
+                endpoints.MapHub<Hubs.ServiceAppHub>("/serviceAppHub");
             });
 
             

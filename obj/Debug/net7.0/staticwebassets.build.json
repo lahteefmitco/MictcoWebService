@@ -1,11 +1,1 @@
-{
-  "Version": 1,
-  "Hash": "8KpmejF8KDiupQuKtu7b5jgiXjywU0s6Vpn3i7ZhbFo=",
-  "Source": "MictcoWebService",
-  "BasePath": "_content/MictcoWebService",
-  "Mode": "Default",
-  "ManifestType": "Build",
-  "ReferencedProjectsConfiguration": [],
-  "DiscoveryPatterns": [],
-  "Assets": []
-}
+{"Version":1,"Hash":"ZcU4kM3wJvPG6KZVbcigeWjGjJa6x+HoNOB7MVT5CZU=","Source":"MictcoWebService","BasePath":"/","Mode":"Root","ManifestType":"Build","ReferencedProjectsConfiguration":[],"DiscoveryPatterns":[],"Assets":[],"Endpoints":[]}
