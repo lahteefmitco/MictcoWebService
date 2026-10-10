@@ -3364,7 +3364,7 @@ namespace MictcoWebService.Controllers
             }
             finally
             {
-                Console.WriteLine("Releasing SQL connection for user ");
+                
                 usqlre?.close();
             }
         }
@@ -4529,7 +4529,7 @@ namespace MictcoWebService.Controllers
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                Console.WriteLine("GetAllCustomers");
+                
 
                 usqlre = new UserSqlServer(this);
                 if (!await usqlre.OpenConnectionAsync(cancellationToken))
